@@ -1,4 +1,4 @@
-# Python_aiogram_telegram_bot_with_cart_and_payment
+# Telegram bot with Django admin pannel and payments
 This Telegram bot template is designed and written in Python using the aiogram library.
 
 This bot has the function of accepting payments, shopping carts, and there is also the ability to implement the mailing functionality (to be added later).

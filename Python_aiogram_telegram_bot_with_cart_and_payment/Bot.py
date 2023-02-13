@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from aiogram import types
 from aiogram.utils import executor
 from aiogram.types import LabeledPrice
@@ -7,7 +9,7 @@ import markups as mar
 import shipment as ship
 
 print('Бот вышел в онлайн')
-db.sql_start()
+print(db.sql_start())
 
 
 @dp.message_handler(commands='start')
@@ -16,11 +18,14 @@ async def start(message: types.Message):
     user_name = message.from_user.first_name
     user_surname = message.from_user.last_name
     username = message.from_user.username
+    # await bot.send_message(message.chat.id,
+    #                        text="Привет, {0.first_name}! Я тестовый бот!".format(
+    #                            message.from_user), reply_markup=mar.generate_start_kb())
+    if not db.exist_in_users_table("user_id", user_id):
+        db.add_user(user_id, user_name, user_surname, username)
     await bot.send_message(message.chat.id,
                            text="Привет, {0.first_name}! Я тестовый бот!".format(
                                message.from_user), reply_markup=mar.generate_start_kb())
-    if not db.exist_in_users_table("user_id", user_id):
-        db.add_user(user_id, user_name, user_surname, username)
 
 
 @dp.callback_query_handler(text="catalog")
@@ -279,12 +284,16 @@ async def process_pre_checkout_query(pre_checkout_query: types.PreCheckoutQuery)
 async def process_pay(message: types.Message):
     user_id = message.from_user.id
     if message.successful_payment.invoice_payload == 'Заказ':
-        await bot.send_message(message.from_user.id, "Оплата прошла успешно")
+        await bot.send_message(message.from_user.id, "Оплата прошла успешно, скоро Вам будет отправлен трек номер")
+        await bot.send_message(message.from_user.id, "Пожалуйста не отключайте и не блокируйте бота, "
+                                                     "иначе мы не сможем Вам отправить Ваш трек номер",
+                               reply_markup=mar.generate_manager_kb())
         total_amount = message.successful_payment.total_amount // 100
         currency = message.successful_payment.currency
         user_name = message.successful_payment.order_info["name"]
         user_phone = message.successful_payment.order_info["phone_number"]
         user_nik = ''.join(db.get_user_name(user_id))
+        order_time = message.date
         shipment = message.successful_payment.shipping_option_id
         if shipment == 'ru_post':
             shipment = "Почта России"
@@ -298,16 +307,30 @@ async def process_pay(message: types.Message):
             if not value == "" or None:
                 new_address.append(value)
         separator = '\n'
-        await bot.send_message("", text=f'ЗАКАЗ:\n\n'  # TODO fill the chat or user id who want to get message with information of order 
-                                        f'Ник - @{user_nik}\n\n'
-                                        f'Имя - {user_name}\n\n'
-                                        f'Номер телефона - +{user_phone}\n\n'
-                                        f'Итоговая сумма - {total_amount:.2f} {currency}\n\n'
-                                        f'Товары :\n'
-                                        f'{separator.join([f"{prod_name} : {prod_data[0]} шт" for prod_name, prod_data in db.get_user_cart(user_id).items()])}\n\n'
-                                        f'Отправка - {shipment}\n\n'
-                                        f'Адрес - {", ".join(new_address)}')
-    db.delete_user_cart(user_id)
+        products = separator.join([f"{prod_name} : "
+                                   f"{prod_data[0]} шт" for prod_name, prod_data in db.get_user_cart(user_id).items()])
+        new_address = ", ".join(new_address)
+        await bot.send_message(5936001741, text=f'ЗАКАЗ:\n\n'
+                                                f'Ник - @{user_nik}\n\n'
+                                                f'Имя - {user_name}\n\n'
+                                                f'Номер телефона - +{user_phone}\n\n'
+                                                f'Итоговая сумма - {total_amount:.2f} {currency}\n\n'
+                                                f'Товары :\n'
+                                                f'{products}\n\n'
+                                                f'Отправка - {shipment}\n\n'
+                                                f'Адрес - {new_address}')
+        db.fill_order_table(user_id, user_nik, user_name, user_phone, round(total_amount, 2),
+                            products, shipment, new_address, order_time-timedelta(hours=3))
+        while True:
+            if db.get_user_track_number(user_id):
+                await bot.send_message(message.from_user.id, f"Ваш трек номер - {db.get_user_track_number(user_id)}\n\n"
+                                                             f"Если возникнут трудности, "
+                                                             f"то обращайтесь к менеджеру по кнопке ниже",
+                                       reply_markup=mar.generate_manager_kb())
+                db.update_track_number_status(user_id, db.get_user_track_number(user_id))
+                break
+
+        db.delete_user_cart(user_id)
 
 
 if __name__ == '__main__':
